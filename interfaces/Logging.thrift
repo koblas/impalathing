@@ -15,12 +15,31 @@
 // specific language governing permissions and limitations
 // under the License.
 
-include "ErrorCodes.thrift"
-
 namespace cpp impala
 namespace java org.apache.impala.thrift
 
-struct TStatus {
-  1: required ErrorCodes.TErrorCode status_code
-  2: list<string> error_msgs
+// Types to support Impala log forwarding.
+
+// Convenience type to map between log4j levels and glog severity
+enum TLogLevel {
+  VLOG_3,
+  VLOG_2
+  VLOG,
+  INFO,
+  WARN,
+  ERROR,
+  FATAL
+}
+
+// Helper structs for GetJavaLogLevel(), SetJavaLogLevel() methods.
+// These are used as input params to get/set the logging level of a
+// particular Java class at runtime using GlogAppender.getLogLevel()
+// and GlogAppender.setLogLevel() methods.
+struct TGetJavaLogLevelParams {
+  1: required string class_name
+}
+
+struct TSetJavaLogLevelParams {
+  1: required string class_name
+  2: required string log_level
 }

@@ -1,10 +1,30 @@
 #!/usr/local/bin/thrift -java
+
+/**
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #
 # Thrift Service that the MetaStore is built on
 #
 
 include "fb303.thrift"
 
+namespace py impala._thrift_gen.hive_metastore
 namespace java org.apache.hadoop.hive.metastore.api
 namespace php metastore
 namespace cpp Apache.Hadoop.Hive
@@ -41,6 +61,14 @@ enum PrincipalType {
   USER = 1,
   ROLE = 2,
   GROUP = 3,
+}
+
+const string HIVE_FILTER_FIELD_OWNER = "hive_filter_field_owner__"
+const string HIVE_FILTER_FIELD_PARAMS = "hive_filter_field_params__"
+const string HIVE_FILTER_FIELD_LAST_ACCESS = "hive_filter_field_last_access__"
+
+enum PartitionEventType {
+  LOAD_DONE = 1,  
 }
 
 struct HiveObjectRef{
@@ -104,6 +132,7 @@ struct Order {
   2: i32    order // asc(1) or desc(0)
 }
 
+
 // this object holds all the information about physical storage of the data belonging to a table
 struct StorageDescriptor {
   1: list<FieldSchema> cols,  // required (refer to types defined above)
@@ -115,7 +144,8 @@ struct StorageDescriptor {
   7: SerDeInfo    serdeInfo,  // serialization and deserialization information
   8: list<string> bucketCols, // reducer grouping columns and clustering columns and bucketing columns`
   9: list<Order>  sortCols,   // sort order of the data in each bucket
-  10: map<string, string> parameters // any user supplied key value hash
+  10: map<string, string> parameters, // any user supplied key value hash
+  12: optional bool   storedAsSubDirectories       // stored as subdirectories or not
 }
 
 // table information
@@ -159,11 +189,80 @@ struct Index {
   10: bool         deferredRebuild
 }
 
+// column statistics
+struct BooleanColumnStatsData {
+1: required i64 numTrues,
+2: required i64 numFalses,
+3: required i64 numNulls
+}
+
+struct DoubleColumnStatsData {
+1: required double lowValue,
+2: required double highValue,
+3: required i64 numNulls,
+4: required i64 numDVs
+}
+
+struct LongColumnStatsData {
+1: required i64 lowValue,
+2: required i64 highValue,
+3: required i64 numNulls,
+4: required i64 numDVs
+}
+
+struct StringColumnStatsData {
+1: required i64 maxColLen,
+2: required double avgColLen,
+3: required i64 numNulls,
+4: required i64 numDVs
+}
+
+struct BinaryColumnStatsData {
+1: required i64 maxColLen,
+2: required double avgColLen,
+3: required i64 numNulls
+}
+
+union ColumnStatisticsData {
+1: BooleanColumnStatsData booleanStats,
+2: LongColumnStatsData longStats,
+3: DoubleColumnStatsData doubleStats,
+4: StringColumnStatsData stringStats,
+5: BinaryColumnStatsData binaryStats
+}
+
+struct ColumnStatisticsObj {
+1: required string colName,
+2: required string colType,
+3: required ColumnStatisticsData statsData
+}
+
+struct ColumnStatisticsDesc {
+1: required bool isTblLevel,
+2: required string dbName,
+3: required string tableName,
+4: optional string partName,
+5: optional i64 lastAnalyzed
+}
+
+struct ColumnStatistics {
+1: required ColumnStatisticsDesc statsDesc,
+2: required list<ColumnStatisticsObj> statsObj;
+}
+
 // schema of the table/query results etc.
 struct Schema {
  // column names, types, comments
  1: list<FieldSchema> fieldSchemas,  // delimiters etc
  2: map<string, string> properties
+}
+
+// Key-value store to be used with selected
+// Metastore APIs (create, alter methods).
+// The client can pass environment properties / configs that can be
+// accessed in hooks.
+struct EnvironmentContext {
+  1: map<string, string> properties
 }
 
 exception MetaException {
@@ -179,6 +278,14 @@ exception UnknownDBException {
 }
 
 exception AlreadyExistsException {
+  1: string message
+}
+
+exception InvalidPartitionException {
+  1: string message
+}
+
+exception UnknownPartitionException {
   1: string message
 }
 
@@ -202,6 +309,10 @@ exception ConfigValSecurityException {
   1: string message
 }
 
+exception InvalidInputException {
+  1: string message
+}
+
 /**
 * This interface is live.
 */
@@ -209,7 +320,7 @@ service ThriftHiveMetastore extends fb303.FacebookService
 {
   void create_database(1:Database database) throws(1:AlreadyExistsException o1, 2:InvalidObjectException o2, 3:MetaException o3)
   Database get_database(1:string name) throws(1:NoSuchObjectException o1, 2:MetaException o2)
-  void drop_database(1:string name, 2:bool deleteData) throws(1:NoSuchObjectException o1, 2:InvalidOperationException o2, 3:MetaException o3)
+  void drop_database(1:string name, 2:bool deleteData, 3:bool cascade) throws(1:NoSuchObjectException o1, 2:InvalidOperationException o2, 3:MetaException o3)
   list<string> get_databases(1:string pattern) throws(1:MetaException o1)
   list<string> get_all_databases() throws(1:MetaException o1)
   void alter_database(1:string dbname, 2:Database db) throws(1:MetaException o1, 2:NoSuchObjectException o2)
@@ -237,6 +348,11 @@ service ThriftHiveMetastore extends fb303.FacebookService
   // sd.serdeInfo.serializationLib (SerDe class name eg org.apache.hadoop.hive.serde.simple_meta.MetadataTypedColumnsetSerDe
   // * See notes on DDL_TIME
   void create_table(1:Table tbl) throws(1:AlreadyExistsException o1, 2:InvalidObjectException o2, 3:MetaException o3, 4:NoSuchObjectException o4)
+  void create_table_with_environment_context(1:Table tbl,
+      2:EnvironmentContext environment_context)
+      throws (1:AlreadyExistsException o1,
+              2:InvalidObjectException o2, 3:MetaException o3,
+              4:NoSuchObjectException o4)
   // drops the table and all the partitions associated with it if the table has partitions
   // delete data (including partitions) if deleteData is set to true
   void drop_table(1:string dbname, 2:string name, 3:bool deleteData)
@@ -246,14 +362,62 @@ service ThriftHiveMetastore extends fb303.FacebookService
 
   Table get_table(1:string dbname, 2:string tbl_name)
                        throws (1:MetaException o1, 2:NoSuchObjectException o2)
+  list<Table> get_table_objects_by_name(1:string dbname, 2:list<string> tbl_names)
+				   throws (1:MetaException o1, 2:InvalidOperationException o2, 3:UnknownDBException o3)
+
+  // Get a list of table names that match a filter.
+  // The filter operators are LIKE, <, <=, >, >=, =, <>
+  //
+  // In the filter statement, values interpreted as strings must be enclosed in quotes,
+  // while values interpreted as integers should not be.  Strings and integers are the only
+  // supported value types.
+  //
+  // The currently supported key names in the filter are:
+  // Constants.HIVE_FILTER_FIELD_OWNER, which filters on the tables' owner's name
+  //   and supports all filter operators
+  // Constants.HIVE_FILTER_FIELD_LAST_ACCESS, which filters on the last access times
+  //   and supports all filter operators except LIKE
+  // Constants.HIVE_FILTER_FIELD_PARAMS, which filters on the tables' parameter keys and values
+  //   and only supports the filter operators = and <>.
+  //   Append the parameter key name to HIVE_FILTER_FIELD_PARAMS in the filter statement.
+  //   For example, to filter on parameter keys called "retention", the key name in the filter
+  //   statement should be Constants.HIVE_FILTER_FIELD_PARAMS + "retention"
+  //   Also, = and <> only work for keys that exist
+  //   in the tables. E.g., if you are looking for tables where key1 <> value, it will only
+  //   look at tables that have a value for the parameter key1.
+  // Some example filter statements include:
+  // filter = Constants.HIVE_FILTER_FIELD_OWNER + " like \".*test.*\" and " +
+  //   Constants.HIVE_FILTER_FIELD_LAST_ACCESS + " = 0";
+  // filter = Constants.HIVE_FILTER_FIELD_PARAMS + "retention = \"30\" or " +
+  //   Constants.HIVE_FILTER_FIELD_PARAMS + "retention = \"90\""
+  // @param dbName
+  //          The name of the database from which you will retrieve the table names
+  // @param filterType
+  //          The type of filter
+  // @param filter
+  //          The filter string
+  // @param max_tables
+  //          The maximum number of tables returned
+  // @return  A list of table names that match the desired filter
+  list<string> get_table_names_by_filter(1:string dbname, 2:string filter, 3:i16 max_tables=-1)
+                       throws (1:MetaException o1, 2:InvalidOperationException o2, 3:UnknownDBException o3)
+
   // alter table applies to only future partitions not for existing partitions
   // * See notes on DDL_TIME
   void alter_table(1:string dbname, 2:string tbl_name, 3:Table new_tbl)
                        throws (1:InvalidOperationException o1, 2:MetaException o2)
-
+  void alter_table_with_environment_context(1:string dbname, 2:string tbl_name,
+      3:Table new_tbl, 4:EnvironmentContext environment_context)
+      throws (1:InvalidOperationException o1, 2:MetaException o2) 
   // the following applies to only tables that have partitions
   // * See notes on DDL_TIME
   Partition add_partition(1:Partition new_part)
+                       throws(1:InvalidObjectException o1, 2:AlreadyExistsException o2, 3:MetaException o3)
+  Partition add_partition_with_environment_context(1:Partition new_part,
+      2:EnvironmentContext environment_context)
+      throws (1:InvalidObjectException o1, 2:AlreadyExistsException o2,
+      3:MetaException o3)
+  i32 add_partitions(1:list<Partition> new_parts)
                        throws(1:InvalidObjectException o1, 2:AlreadyExistsException o2, 3:MetaException o3)
   Partition append_partition(1:string db_name, 2:string tbl_name, 3:list<string> part_vals)
                        throws (1:InvalidObjectException o1, 2:AlreadyExistsException o2, 3:MetaException o3)
@@ -290,24 +454,44 @@ service ThriftHiveMetastore extends fb303.FacebookService
   // as "".
   list<Partition> get_partitions_ps(1:string db_name 2:string tbl_name 
   	3:list<string> part_vals, 4:i16 max_parts=-1)
-                       throws(1:MetaException o1)
+                       throws(1:MetaException o1, 2:NoSuchObjectException o2)
   list<Partition> get_partitions_ps_with_auth(1:string db_name, 2:string tbl_name, 3:list<string> part_vals, 4:i16 max_parts=-1, 
      5: string user_name, 6: list<string> group_names) throws(1:NoSuchObjectException o1, 2:MetaException o2)                       
   
   list<string> get_partition_names_ps(1:string db_name, 
   	2:string tbl_name, 3:list<string> part_vals, 4:i16 max_parts=-1)
-  	                   throws(1:MetaException o1)
+  	                   throws(1:MetaException o1, 2:NoSuchObjectException o2)
 
   // get the partitions matching the given partition filter
   list<Partition> get_partitions_by_filter(1:string db_name 2:string tbl_name
     3:string filter, 4:i16 max_parts=-1)
                        throws(1:MetaException o1, 2:NoSuchObjectException o2)
 
+  // get partitions give a list of partition names
+  list<Partition> get_partitions_by_names(1:string db_name 2:string tbl_name 3:list<string> names)
+                       throws(1:MetaException o1, 2:NoSuchObjectException o2)
+
   // changes the partition to the new partition object. partition is identified from the part values
   // in the new_part
   // * See notes on DDL_TIME
   void alter_partition(1:string db_name, 2:string tbl_name, 3:Partition new_part)
-                       throws(1:InvalidOperationException o1, 2:MetaException o2)
+                       throws (1:InvalidOperationException o1, 2:MetaException o2)
+                       
+  // change a list of partitions. All partitions are altered atomically and all 
+  // prehooks are fired together followed by all post hooks
+  void alter_partitions(1:string db_name, 2:string tbl_name, 3:list<Partition> new_parts)
+                       throws (1:InvalidOperationException o1, 2:MetaException o2)
+
+  void alter_partition_with_environment_context(1:string db_name,
+      2:string tbl_name, 3:Partition new_part,
+      4:EnvironmentContext environment_context)
+      throws (1:InvalidOperationException o1, 2:MetaException o2)
+
+  // rename the old partition to the new partition object by changing old part values to the part values
+  // in the new_part. old partition is identified from part_vals.
+  // partition keys in new_part should be the same as those in old partition.
+  void rename_partition(1:string db_name, 2:string tbl_name, 3:list<string> part_vals, 4:Partition new_part)
+                       throws (1:InvalidOperationException o1, 2:MetaException o2)
 
   // gets the value of the configuration key in the metastore server. returns
   // defaultValue if the key does not exist. if the configuration key does not
@@ -324,6 +508,15 @@ service ThriftHiveMetastore extends fb303.FacebookService
   map<string, string> partition_name_to_spec(1: string part_name)
                           throws(1: MetaException o1)
   
+  void markPartitionForEvent(1:string db_name, 2:string tbl_name, 3:map<string,string> part_vals,
+                  4:PartitionEventType eventType) throws (1: MetaException o1, 2: NoSuchObjectException o2, 
+                  3: UnknownDBException o3, 4: UnknownTableException o4, 5: UnknownPartitionException o5,
+                  6: InvalidPartitionException o6) 
+  bool isPartitionMarkedForEvent(1:string db_name, 2:string tbl_name, 3:map<string,string> part_vals, 
+                  4: PartitionEventType eventType) throws (1: MetaException o1, 2:NoSuchObjectException o2,
+                  3: UnknownDBException o3, 4: UnknownTableException o4, 5: UnknownPartitionException o5,
+                  6: InvalidPartitionException o6) 
+                         
   //index
   Index add_index(1:Index new_index, 2: Table index_table)
                        throws(1:InvalidObjectException o1, 2:AlreadyExistsException o2, 3:MetaException o3)
@@ -338,6 +531,37 @@ service ThriftHiveMetastore extends fb303.FacebookService
                        throws(1:NoSuchObjectException o1, 2:MetaException o2)
   list<string> get_index_names(1:string db_name, 2:string tbl_name, 3:i16 max_indexes=-1)
                        throws(1:MetaException o2)
+
+  // column statistics interfaces
+
+  // update APIs persist the column statistics object(s) that are passed in. If statistics already
+  // exists for one or more columns, the existing statistics will be overwritten. The update APIs
+  // validate that the dbName, tableName, partName, colName[] passed in as part of the ColumnStatistics
+  // struct are valid, throws InvalidInputException/NoSuchObjectException if found to be invalid
+  bool update_table_column_statistics(1:ColumnStatistics stats_obj) throws (1:NoSuchObjectException o1,
+              2:InvalidObjectException o2, 3:MetaException o3, 4:InvalidInputException o4)
+  bool update_partition_column_statistics(1:ColumnStatistics stats_obj) throws (1:NoSuchObjectException o1,
+              2:InvalidObjectException o2, 3:MetaException o3, 4:InvalidInputException o4)
+
+  // get APIs return the column statistics corresponding to db_name, tbl_name, [part_name], col_name if
+  // such statistics exists. If the required statistics doesn't exist, get APIs throw NoSuchObjectException
+  // For instance, if get_table_column_statistics is called on a partitioned table for which only
+  // partition level column stats exist, get_table_column_statistics will throw NoSuchObjectException
+  ColumnStatistics get_table_column_statistics(1:string db_name, 2:string tbl_name, 3:string col_name) throws
+              (1:NoSuchObjectException o1, 2:MetaException o2, 3:InvalidInputException o3, 4:InvalidObjectException o4)
+  ColumnStatistics get_partition_column_statistics(1:string db_name, 2:string tbl_name, 3:string part_name,
+               4:string col_name) throws (1:NoSuchObjectException o1, 2:MetaException o2,
+               3:InvalidInputException o3, 4:InvalidObjectException o4)
+
+  // delete APIs attempt to delete column statistics, if found, associated with a given db_name, tbl_name, [part_name]
+  // and col_name. If the delete API doesn't find the statistics record in the metastore, throws NoSuchObjectException
+  // Delete API validates the input and if the input is invalid throws InvalidInputException/InvalidObjectException.
+  bool delete_partition_column_statistics(1:string db_name, 2:string tbl_name, 3:string part_name, 4:string col_name) throws
+              (1:NoSuchObjectException o1, 2:MetaException o2, 3:InvalidObjectException o3,
+               4:InvalidInputException o4)
+  bool delete_table_column_statistics(1:string db_name, 2:string tbl_name, 3:string col_name) throws
+              (1:NoSuchObjectException o1, 2:MetaException o2, 3:InvalidObjectException o3,
+               4:InvalidInputException o4)
 
   //authorization privileges
                        
@@ -358,18 +582,16 @@ service ThriftHiveMetastore extends fb303.FacebookService
   bool grant_privileges(1:PrivilegeBag privileges) throws(1:MetaException o1)
   bool revoke_privileges(1:PrivilegeBag privileges) throws(1:MetaException o1)
   
+  // this is used by metastore client to send UGI information to metastore server immediately
+  // after setting up a connection. 
+  list<string> set_ugi(1:string user_name, 2:list<string> group_names) throws (1:MetaException o1)
+
   //Authentication (delegation token) interfaces
   
   // get metastore server delegation token for use from the map/reduce tasks to authenticate
   // to metastore server
-  string get_delegation_token(1:string renewer_kerberos_principal_name) throws (1:MetaException o1)
-
-  // get metastore server delegation token for use from the map/reduce tasks to authenticate
-  // to metastore server - this method takes an extra token signature string which is just
-  // an identifier to associate with the token - this will be used by the token selector code
-  // to pick the right token given the associated identifier.
-  string get_delegation_token_with_signature(1:string renewer_kerberos_principal_name, 
-    2:string token_signature) throws (1:MetaException o1)
+  string get_delegation_token(1:string token_owner, 2:string renewer_kerberos_principal_name)
+    throws (1:MetaException o1)
 
   // method to renew delegation token obtained from metastore server
   i64 renew_delegation_token(1:string token_str_form) throws (1:MetaException o1)
