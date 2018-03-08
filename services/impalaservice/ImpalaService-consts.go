@@ -9,11 +9,11 @@ import (
 	"context"
 	"fmt"
 	"git.apache.org/thrift.git/lib/go/thrift"
-	"github.com/MediaMath/gudu/services/execstats"
-	"github.com/MediaMath/gudu/services/status"
-	"github.com/MediaMath/gudu/services/types"
-	"github.com/MediaMath/gudu/services/beeswax"
-	"github.com/MediaMath/gudu/services/tcliservice"
+	"github.com/MediaMath/impalathing/services/execstats"
+	"github.com/MediaMath/impalathing/services/status"
+	"github.com/MediaMath/impalathing/services/types"
+	"github.com/MediaMath/impalathing/services/beeswax"
+	"github.com/MediaMath/impalathing/services/tcliservice"
 
 )
 

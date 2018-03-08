@@ -11,8 +11,8 @@ import (
 	"context"
 	"fmt"
 	"git.apache.org/thrift.git/lib/go/thrift"
-	"github.com/MediaMath/gudu/services/status"
-	"github.com/MediaMath/gudu/services/types"
+	"github.com/MediaMath/impalathing/services/status"
+	"github.com/MediaMath/impalathing/services/types"
 
 )
 

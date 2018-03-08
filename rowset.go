@@ -1,4 +1,4 @@
-package gudu
+package impalathing
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MediaMath/gudu/services/beeswax"
-	impala "github.com/MediaMath/gudu/services/impalaservice"
+	"github.com/MediaMath/impalathing/services/beeswax"
+	impala "github.com/MediaMath/impalathing/services/impalaservice"
 )
 
 type rowSet struct {

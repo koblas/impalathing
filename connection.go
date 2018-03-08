@@ -1,11 +1,11 @@
-package gudu
+package impalathing
 
 import (
 	"context"
 	"fmt"
 	"git.apache.org/thrift.git/lib/go/thrift"
-	"github.com/MediaMath/gudu/services/beeswax"
-	impala "github.com/MediaMath/gudu/services/impalaservice"
+	"github.com/MediaMath/impalathing/services/beeswax"
+	impala "github.com/MediaMath/impalathing/services/impalaservice"
 	"log"
 )
 

@@ -14,7 +14,7 @@ import (
         "strconv"
         "strings"
         "git.apache.org/thrift.git/lib/go/thrift"
-        "github.com/MediaMath/gudu/services/fb303"
+        "github.com/MediaMath/impalathing/services/fb303"
 )
 
 
