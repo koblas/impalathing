@@ -45,6 +45,7 @@ type RowSet interface {
 	Wait() (*Status, error)
 	FetchAll() []map[string]interface{}
 	MapScan(dest map[string]interface{}) error
+	Handle() *beeswax.QueryHandle
 }
 
 // Represents job status, including success state and time the
@@ -68,6 +69,10 @@ func (s *Status) IsSuccess() bool {
 
 func (s *Status) IsComplete() bool {
 	return s.state == beeswax.QueryState_FINISHED
+}
+
+func (r *rowSet) Handle() *beeswax.QueryHandle {
+	return r.handle
 }
 
 // Issue a thrift call to check for the job's current status.

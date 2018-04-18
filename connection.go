@@ -69,6 +69,10 @@ func (c *Connection) Close() error {
 	return nil
 }
 
+func (c *Connection) CloseQuery(ctx context.Context, handle *beeswax.QueryHandle) error {
+	return c.client.Close(ctx, handle)
+}
+
 func (c *Connection) Query(ctx context.Context, query string) (RowSet, error) {
 	bquery := beeswax.Query{}
 
