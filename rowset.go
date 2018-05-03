@@ -19,9 +19,6 @@ type rowSet struct {
 	handle  *beeswax.QueryHandle
 	options Options
 
-	// columns    []*tcliservice.TColumnDesc
-	columnNames []string
-
 	offset  int
 	rowSet  *beeswax.Results
 	hasMore bool
@@ -56,7 +53,7 @@ type Status struct {
 }
 
 func newRowSet(ctx context.Context, client *impala.ImpalaServiceClient, handle *beeswax.QueryHandle, options Options) RowSet {
-	return &rowSet{ctx: ctx, client: client, handle: handle, options: options, columnNames: nil, offset: 0, rowSet: nil,
+	return &rowSet{ctx: ctx, client: client, handle: handle, options: options, offset: 0, rowSet: nil,
 		hasMore: true, ready: false, metadata: nil, nextRow: nil}
 }
 
@@ -120,6 +117,12 @@ func (r *rowSet) waitForSuccess() error {
 		if !status.IsSuccess() || !r.ready {
 			return fmt.Errorf("Unsuccessful query execution: %+v", status)
 		}
+		if r.metadata == nil {
+			r.metadata, err = r.client.GetResultsMetadata(r.ctx, r.handle)
+			if err != nil {
+				log.Printf("GetResultsMetadata failed: %v\n", err)
+			}
+		}
 	}
 
 	return nil
@@ -145,17 +148,6 @@ func (r *rowSet) Next() bool {
 			log.Printf("FetchResults failed: %v\n", err)
 			return false
 		}
-
-		if r.metadata == nil {
-			r.metadata, err = r.client.GetResultsMetadata(r.ctx, r.handle)
-			if err != nil {
-				log.Printf("GetResultsMetadata failed: %v\n", err)
-			}
-		}
-		if len(r.columnNames) == 0 {
-			r.columnNames = resp.Columns
-		}
-
 		r.hasMore = resp.HasMore
 
 		r.rowSet = resp
@@ -278,13 +270,19 @@ func (r *rowSet) GetRow() ([]string, error) {
 // Returns the names of the columns for the given operation,
 // blocking if necessary until the information is available.
 func (r *rowSet) Columns() []string {
-	if r.columnNames == nil {
+	if r.metadata == nil {
 		if err := r.waitForSuccess(); err != nil {
 			return nil
 		}
 	}
+	fs := r.metadata.Schema.FieldSchemas
+	cl := make([]string, len(fs))
 
-	return r.columnNames
+	for i, f := range fs {
+		cl[i] = f.Name
+	}
+
+	return cl
 }
 
 // MapScan scans a single Row into the dest map[string]interface{}.

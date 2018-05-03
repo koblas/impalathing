@@ -73,6 +73,20 @@ func (c *Connection) CloseQuery(ctx context.Context, handle *beeswax.QueryHandle
 	return c.client.Close(ctx, handle)
 }
 
+func (c *Connection) ExecuteAndWait(ctx context.Context, query string) (RowSet, error) {
+	bquery := beeswax.Query{}
+
+	bquery.Query = query
+	bquery.Configuration = []string{}
+
+	handle, err := c.client.ExecuteAndWait(ctx, &bquery, "chimpala")
+
+	if err != nil {
+		return nil, err
+	}
+
+	return newRowSet(ctx, c.client, handle, c.options), nil
+}
 func (c *Connection) Query(ctx context.Context, query string) (RowSet, error) {
 	bquery := beeswax.Query{}
 
