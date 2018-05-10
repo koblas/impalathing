@@ -15,12 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-include "ErrorCodes.thrift"
+namespace cpp impalatest
 
-namespace cpp impala
-namespace java org.apache.impala.thrift
+struct ThriftDataParams {
+  1: required string data
+}
 
-struct TStatus {
-  1: required ErrorCodes.TErrorCode status_code
-  2: list<string> error_msgs
+struct ThriftDataResult {
+  1: required i64 bytes_received
+}
+
+service NetworkTestService {
+  ThriftDataResult Send(1:ThriftDataParams params);
 }

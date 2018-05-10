@@ -1,6 +1,7 @@
 package impalathing
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -8,17 +9,15 @@ import (
 	"strings"
 	"time"
 
-	impala "github.com/koblas/impalathing/services/impalaservice"
-	"github.com/koblas/impalathing/services/beeswax"
+	"github.com/MediaMath/impalathing/services/beeswax"
+	impala "github.com/MediaMath/impalathing/services/impalaservice"
 )
 
 type rowSet struct {
+	ctx     context.Context
 	client  *impala.ImpalaServiceClient
 	handle  *beeswax.QueryHandle
 	options Options
-
-	// columns    []*tcliservice.TColumnDesc
-	columnNames []string
 
 	offset  int
 	rowSet  *beeswax.Results
@@ -38,10 +37,12 @@ type RowSet interface {
 	Columns() []string
 	Next() bool
 	Scan(dest ...interface{}) error
+	GetRow() ([]string, error)
 	Poll() (*Status, error)
 	Wait() (*Status, error)
 	FetchAll() []map[string]interface{}
 	MapScan(dest map[string]interface{}) error
+	Handle() *beeswax.QueryHandle
 }
 
 // Represents job status, including success state and time the
@@ -51,9 +52,9 @@ type Status struct {
 	Error error
 }
 
-func newRowSet(client *impala.ImpalaServiceClient, handle *beeswax.QueryHandle, options Options) RowSet {
-  return &rowSet{client: client, handle: handle, options: options, columnNames: nil, offset: 0, rowSet: nil, 
-  hasMore: true, ready: false, metadata: nil, nextRow: nil}
+func newRowSet(ctx context.Context, client *impala.ImpalaServiceClient, handle *beeswax.QueryHandle, options Options) RowSet {
+	return &rowSet{ctx: ctx, client: client, handle: handle, options: options, offset: 0, rowSet: nil,
+		hasMore: true, ready: false, metadata: nil, nextRow: nil}
 }
 
 //
@@ -67,9 +68,13 @@ func (s *Status) IsComplete() bool {
 	return s.state == beeswax.QueryState_FINISHED
 }
 
+func (r *rowSet) Handle() *beeswax.QueryHandle {
+	return r.handle
+}
+
 // Issue a thrift call to check for the job's current status.
 func (r *rowSet) Poll() (*Status, error) {
-	state, err := r.client.GetState(r.handle)
+	state, err := r.client.GetState(r.ctx, r.handle)
 
 	if err != nil {
 		return nil, fmt.Errorf("Error getting status: %v", err)
@@ -112,6 +117,12 @@ func (r *rowSet) waitForSuccess() error {
 		if !status.IsSuccess() || !r.ready {
 			return fmt.Errorf("Unsuccessful query execution: %+v", status)
 		}
+		if r.metadata == nil {
+			r.metadata, err = r.client.GetResultsMetadata(r.ctx, r.handle)
+			if err != nil {
+				log.Printf("GetResultsMetadata failed: %v\n", err)
+			}
+		}
 	}
 
 	return nil
@@ -132,22 +143,11 @@ func (r *rowSet) Next() bool {
 			return false
 		}
 
-		resp, err := r.client.Fetch(r.handle, false, 1000000)
+		resp, err := r.client.Fetch(r.ctx, r.handle, false, 1000000)
 		if err != nil {
 			log.Printf("FetchResults failed: %v\n", err)
 			return false
 		}
-
-		if r.metadata == nil {
-		  r.metadata, err = r.client.GetResultsMetadata(r.handle)
-		  if err != nil {
-				log.Printf("GetResultsMetadata failed: %v\n", err)
-			  }
-		}
-		if len(r.columnNames) == 0 {
-			r.columnNames = resp.Columns
-		}
-
 		r.hasMore = resp.HasMore
 
 		r.rowSet = resp
@@ -218,59 +218,71 @@ func (r *rowSet) Scan(dest ...interface{}) error {
 	return nil
 }
 
-
 //Convert from a hive column type to a Go type
 func (r *rowSet) convertRawValue(raw string, hiveType string) (interface{}, error) {
-		switch hiveType {
-		case "string":
-			return raw, nil
-		case "int", "tinyint", "smallint":
-			i, err := strconv.ParseInt(raw, 10, 0)
-			return int32(i), err
-		case "bigint":
-			i, err := strconv.ParseInt(raw, 10, 0)
-			return int64(i), err
-		case "float", "double", "decimal":
-		  i, err := strconv.ParseFloat(raw, 64)
-		  return i, err
-		case "timestamp":
-		  i, err := time.Parse("2006-01-02 15:04:05", raw)
-		  return i, err
-		case "boolean":
-		  return raw == "true", nil
-		default:
-			return nil, errors.New(fmt.Sprintf("Invalid hive type %v", hiveType))
-		}
+	switch hiveType {
+	case "string":
+		return raw, nil
+	case "int", "tinyint", "smallint":
+		i, err := strconv.ParseInt(raw, 10, 0)
+		return int32(i), err
+	case "bigint":
+		i, err := strconv.ParseInt(raw, 10, 0)
+		return int64(i), err
+	case "float", "double", "decimal":
+		i, err := strconv.ParseFloat(raw, 64)
+		return i, err
+	case "timestamp":
+		i, err := time.Parse("2006-01-02 15:04:05", raw)
+		return i, err
+	case "boolean":
+		return raw == "true", nil
+	default:
+		return nil, errors.New(fmt.Sprintf("Invalid hive type %v", hiveType))
+	}
 }
 
-//Fetch all rows and convert to a []map[string]interface{} with 
+//Fetch all rows and convert to a []map[string]interface{} with
 //appropriate type conversion already carried out
-func (r *rowSet) FetchAll() ([]map[string]interface{} ) {
-	response := make([]map[string]interface{},0)
+func (r *rowSet) FetchAll() []map[string]interface{} {
+	response := make([]map[string]interface{}, 0)
 	for r.Next() {
-	  row := make(map[string]interface{})
-	  for i, val := range r.nextRow {
-		conv, err := r.convertRawValue(val, r.metadata.Schema.FieldSchemas[i].Type)
-		if err != nil {
-		  fmt.Printf("%v\n", err)
+		row := make(map[string]interface{})
+		for i, val := range r.nextRow {
+			conv, err := r.convertRawValue(val, r.metadata.Schema.FieldSchemas[i].Type)
+			if err != nil {
+				fmt.Printf("%v\n", err)
+			}
+			row[r.metadata.Schema.FieldSchemas[i].Name] = conv
 		}
-		row[r.metadata.Schema.FieldSchemas[i].Name] = conv
-	  }
-	  response = append(response, row)
+		response = append(response, row)
 	}
 	return response
+}
+
+func (r *rowSet) GetRow() ([]string, error) {
+	if r.nextRow == nil {
+		return nil, errors.New("No row to scan! Did you call Next() first?")
+	}
+	return r.nextRow, nil
 }
 
 // Returns the names of the columns for the given operation,
 // blocking if necessary until the information is available.
 func (r *rowSet) Columns() []string {
-	if r.columnNames == nil {
+	if r.metadata == nil {
 		if err := r.waitForSuccess(); err != nil {
 			return nil
 		}
 	}
+	fs := r.metadata.Schema.FieldSchemas
+	cl := make([]string, len(fs))
 
-	return r.columnNames
+	for i, f := range fs {
+		cl[i] = f.Name
+	}
+
+	return cl
 }
 
 // MapScan scans a single Row into the dest map[string]interface{}.
@@ -284,4 +296,3 @@ func (r *rowSet) MapScan(row map[string]interface{}) error {
 	}
 	return nil
 }
-

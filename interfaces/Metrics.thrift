@@ -15,12 +15,35 @@
 // specific language governing permissions and limitations
 // under the License.
 
-include "ErrorCodes.thrift"
-
 namespace cpp impala
 namespace java org.apache.impala.thrift
 
-struct TStatus {
-  1: required ErrorCodes.TErrorCode status_code
-  2: list<string> error_msgs
+// Metric and counter data types.
+enum TUnit {
+  // A dimensionless numerical quantity
+  UNIT,
+  // Rate of a dimensionless numerical quantity
+  UNIT_PER_SECOND,
+  CPU_TICKS,
+  BYTES
+  BYTES_PER_SECOND,
+  TIME_NS,
+  DOUBLE_VALUE,
+  // No units at all, may not be a numerical quantity
+  NONE,
+  TIME_MS,
+  TIME_S
+}
+
+// The kind of value that a metric represents.
+enum TMetricKind {
+  // May go up or down over time
+  GAUGE,
+  // A strictly increasing value
+  COUNTER,
+  // Fixed; will never change
+  PROPERTY,
+  STATS,
+  SET,
+  HISTOGRAM
 }
