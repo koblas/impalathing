@@ -33,12 +33,15 @@ func Connect(ctx context.Context, host string, port int, options Options) (*Conn
 		return nil, err
 	}
 
-	transportFactory := thrift.NewTBufferedTransportFactory(24 * 1024 * 1024)
+	transportFactory := thrift.NewTBufferedTransportFactory(16 * 1024)
 	protocolFactory := thrift.NewTBinaryProtocolFactoryDefault()
 
 	transport, _ := transportFactory.GetTransport(socket)
 
 	if err := transport.Open(); err != nil {
+		if transport != nil {
+			transport.Close()
+		}
 		return nil, err
 	}
 
@@ -79,7 +82,7 @@ func (c *Connection) ExecuteAndWait(ctx context.Context, query string) (RowSet, 
 	bquery.Query = query
 	bquery.Configuration = []string{}
 
-	handle, err := c.client.ExecuteAndWait(ctx, &bquery, "chimpala")
+	handle, err := c.client.ExecuteAndWait(ctx, &bquery, "impala")
 
 	if err != nil {
 		return nil, err
