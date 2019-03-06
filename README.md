@@ -5,7 +5,34 @@ It's based on [hivething](https://github.com/derekgr/hivething)
 Working on this you quickly realize that having strings deliminated by tabs is a ugly API... (That's the thrift
 side of things)
 
+
 ## Usage
+
+
+To add kerberos support this requires header files to build against the GSSAPI C library. They can be installed with:
+
+    Ubuntu: sudo apt-get install libkrb5-dev
+    MacOS: brew install homebrew/dupes/heimdal --without-x11
+    Debian: yum install -y krb5-devel
+
+
+in order to use kerberos, you need an extra dependency
+
+`
+    go get -tags kerberos github.com/beltran/gosasl
+`
+
+then
+
+`
+    go build --tags=kerberos
+`
+
+before starting your application, you should kinit first, for example
+
+`
+    kinit -k -t impala.keytab impala/host@DOMAIN.COM
+`
 
 ```go
 package main
@@ -21,7 +48,8 @@ func main() {
     host := "impala-host"
     port := 21000
 
-    con, err := impalathing.Connect(host, port, impalathing.DefaultOptions)
+    useKerberos := true
+    con, err := impalathing.Connect(host, port, impalathing.DefaultOptions, useKerberos)
 
     if err != nil {
         log.Fatal("Error connecting", err)

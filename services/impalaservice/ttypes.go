@@ -6,7 +6,7 @@ package impalaservice
 import (
 	"bytes"
 	"fmt"
-	"git.apache.org/thrift.git/lib/go/thrift"
+	"github.com/apache/thrift/lib/go/thrift"
 	"github.com/koblas/impalathing/services/beeswax"
 	"github.com/koblas/impalathing/services/cli_service"
 	"github.com/koblas/impalathing/services/status"
