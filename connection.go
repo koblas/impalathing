@@ -3,10 +3,11 @@ package impalathing
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/apache/thrift/lib/go/thrift"
 	"github.com/koblas/impalathing/services/beeswax"
 	impala "github.com/koblas/impalathing/services/impalaservice"
-	"time"
 )
 
 type Options struct {
@@ -76,17 +77,25 @@ func (c *Connection) Close() error {
 	return nil
 }
 
-func (c *Connection) Query(query string) (RowSet, error) {
+func (c *Connection) query(ctx context.Context, query string) (RowSet, error) {
 	bquery := beeswax.Query{}
 
 	bquery.Query = query
 	bquery.Configuration = []string{}
 
-	handle, err := c.client.Query(context.Background(), &bquery)
+	handle, err := c.client.Query(ctx, &bquery)
 
 	if err != nil {
 		return nil, err
 	}
 
 	return newRowSet(c.client, handle, c.options), nil
+}
+
+func (c *Connection) Query(query string) (RowSet, error) {
+	return c.query(context.Background(), query)
+}
+
+func (c *Connection) QueryWithContext(ctx context.Context, query string) (RowSet, error) {
+	return c.query(ctx, query)
 }
