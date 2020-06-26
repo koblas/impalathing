@@ -10,13 +10,54 @@ import (
 	impala "github.com/koblas/impalathing/services/impalaservice"
 )
 
+type Option func(*Options)
+
+func WithConnectionTimeout(timeout time.Duration) Option {
+	return func(o *Options) {
+		o.ConnectionTimeout = timeout
+	}
+}
+
+func WithPollInterval(pollIntervalSeconds float64) Option {
+	return func(o *Options) {
+		o.PollIntervalSeconds = pollIntervalSeconds
+	}
+}
+
+func WithBatchSize(bs int64) Option {
+	return func(o *Options) {
+		o.BatchSize = bs
+	}
+}
+
+func WithPlainSaslTransport(username, password string) Option {
+	return func(o *Options) {
+		o.SaslTransportConfig = map[string]string{
+			"mechanismName": "PLAIN",
+			"username":      username,
+			"password":      password,
+		}
+	}
+}
+
+func WithGSSAPISaslTransport() Option {
+	return func(o *Options) {
+		o.SaslTransportConfig = map[string]string{
+			"mechanismName": "GSSAPI",
+			"service":       "impala",
+		}
+	}
+}
+
 type Options struct {
 	PollIntervalSeconds float64
 	BatchSize           int64
+	ConnectionTimeout   time.Duration
+	SaslTransportConfig map[string]string
 }
 
 var (
-	DefaultOptions = Options{PollIntervalSeconds: 0.1, BatchSize: 10000}
+	DefaultOptions = Options{PollIntervalSeconds: 0.1, BatchSize: 10000, ConnectionTimeout: 10000 * time.Millisecond}
 )
 
 type Connection struct {
@@ -26,19 +67,21 @@ type Connection struct {
 	options   Options
 }
 
-func Connect(host string, port int, options Options, useKerberos bool) (*Connection, error) {
-	socket, err := thrift.NewTSocketTimeout(fmt.Sprintf("%s:%d", host, port), 10000*time.Millisecond)
+func Connect(host string, port int, opts ...Option) (*Connection, error) {
+	var options = DefaultOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	socket, err := thrift.NewTSocketTimeout(fmt.Sprintf("%s:%d", host, port), options.ConnectionTimeout)
 
 	if err != nil {
 		return nil, err
 	}
 
 	var transport thrift.TTransport
-	if useKerberos {
-		saslConfiguration := map[string]string{
-			"service": "impala",
-		}
-		transport, err = NewTSaslTransport(socket, host, "GSSAPI", saslConfiguration)
+	if options.SaslTransportConfig != nil {
+		transport, err = NewTSaslTransport(socket, host, options.SaslTransportConfig)
 		if err != nil {
 			return nil, err
 		}

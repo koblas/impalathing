@@ -48,9 +48,9 @@ func main() {
     host := "impala-host"
     port := 21000
 
-    useKerberos := true
-    con, err := impalathing.Connect(host, port, impalathing.DefaultOptions, useKerberos)
-
+    con, err := impalathing.Connect(host, port)
+    // if you use kerberos
+    con, err := impalathing.Connect(host, port, impalathing.WithGSSAPISaslTransport()) 
     if err != nil {
         log.Fatal("Error connecting", err)
         return

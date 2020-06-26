@@ -38,8 +38,9 @@ type TSaslTransport struct {
 }
 
 // NewTSaslTransport return a TSaslTransport
-func NewTSaslTransport(trans thrift.TTransport, host string, mechanismName string, configuration map[string]string) (*TSaslTransport, error) {
+func NewTSaslTransport(trans thrift.TTransport, host string, configuration map[string]string) (*TSaslTransport, error) {
 	var mechanism gosasl.Mechanism
+	mechanismName, _ := configuration["mechanismName"]
 	if mechanismName == "PLAIN" {
 		mechanism = gosasl.NewPlainMechanism(configuration["username"], configuration["password"])
 	} else if mechanismName == "GSSAPI" {
